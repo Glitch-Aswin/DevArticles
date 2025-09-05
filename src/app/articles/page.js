@@ -194,20 +194,20 @@ export default async function ArticlesPage() {
                       {/* Tags */}
                       <div className="flex flex-wrap gap-2">
                         {article.article_tags?.slice(0, 3).map(({ tag }) => (
-                          <Link
+                            <span
                             key={tag.id}
-                            href={`/tags/${tag.name}`}
-                            className="inline-flex items-center px-2.5 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md text-xs font-medium transition-all duration-200 hover:scale-105"
-                          >
+                            className="inline-flex items-center px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-md text-xs font-medium"
+                            >
                             #{tag.name}
-                          </Link>
+                            </span>
                         ))}
                         {article.article_tags?.length > 3 && (
-                          <span className="inline-flex items-center px-2.5 py-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-md text-xs font-medium">
+                            <span className="inline-flex items-center px-2.5 py-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-md text-xs font-medium">
                             +{article.article_tags.length - 3} more
-                          </span>
+                            </span>
                         )}
-                      </div>
+                        </div>
+
                     </article>
                   ))}
                 </div>
@@ -220,14 +220,14 @@ export default async function ArticlesPage() {
                     <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Popular Tags</h3>
                     <div className="flex flex-wrap gap-2">
                       {popularTags?.slice(0, 12).map((tag) => (
-                        <Link
-                          key={tag.id}
-                          href={`/tags/${tag.name}`}
-                          className="inline-flex items-center px-3 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md text-sm font-medium transition-all duration-200 hover:scale-105"
-                        >
-                          #{tag.name}
-                        </Link>
-                      ))}
+                    <span
+                        key={tag.id}
+                        className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-md text-sm font-medium"
+                    >
+                        #{tag.name}
+                    </span>
+                    ))}
+
                     </div>
                   </div>
                 </div>
