@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { supabase } from "@/utils/supabaseClient";
 
+export const revalidate = 30;
+
 export default async function ArticlesPage() {
   let articles = [];
   let popularTags = [];
