@@ -1,50 +1,49 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { supabase } from "@/utils/supabaseClient";
 
-export const revalidate = 30;
+export default function ArticlesPage() {
+  const [articles, setArticles] = useState([]);
+  const [popularTags, setPopularTags] = useState([]);
+  const [error, setError] = useState(null);
 
-export default async function ArticlesPage() {
-  let articles = [];
-  let popularTags = [];
+  // Fetch data on client side
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const { data: articlesData, error: articlesError } = await supabase
+          .from("articles")
+          .select(`
+            id,
+            title,
+            slug,
+            content,
+            created_at,
+            author:author_id(name),
+            article_tags:article_tags(tag_id, tag:tag_id(id, name))
+          `)
+          .order("created_at", { ascending: false });
 
-  // Fetch data with proper error handling
-  try {
-    const { data: articlesData, error: articlesError } = await supabase
-      .from("articles")
-      .select(`
-        id,
-        title,
-        slug,
-        content,
-        created_at,
-        author:author_id(name),
-        article_tags:article_tags(tag_id, tag:tag_id(id, name))
-      `)
-      .order("created_at", { ascending: false });
+        if (articlesError) throw articlesError;
+        setArticles(articlesData || []);
 
-    if (articlesError) throw articlesError;
-    articles = articlesData || [];
+        const { data: tagsData, error: tagsError } = await supabase
+          .from("tags")
+          .select(`id, name, article_tags(count)`)
+          .limit(10);
 
-    const { data: tagsData, error: tagsError } = await supabase
-      .from("tags")
-      .select(`id, name, article_tags(count)`)
-      .limit(10);
+        if (tagsError) throw tagsError;
+        setPopularTags(tagsData || []);
+      } catch (err) {
+        console.error("Supabase fetch error:", err.message);
+        setError(err.message);
+      }
+    }
 
-    if (tagsError) throw tagsError;
-    popularTags = tagsData || [];
-  } catch (err) {
-    console.error("Supabase fetch error:", err.message);
-    return (
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">
-            Error Loading Articles
-          </h1>
-          <p className="text-neutral-600 dark:text-neutral-400">Please try again later.</p>
-        </div>
-      </div>
-    );
-  }
+    fetchData();
+  }, []);
 
   // Helper function to truncate content
   const truncateContent = (content, maxLength = 200) => {
@@ -60,6 +59,19 @@ export default async function ArticlesPage() {
     const wordCount = content.split(" ").length;
     return Math.ceil(wordCount / wordsPerMinute);
   };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">
+            Error Loading Articles
+          </h1>
+          <p className="text-neutral-600 dark:text-neutral-400">Please try again later.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
@@ -196,20 +208,19 @@ export default async function ArticlesPage() {
                       {/* Tags */}
                       <div className="flex flex-wrap gap-2">
                         {article.article_tags?.slice(0, 3).map(({ tag }) => (
-                            <span
+                          <span
                             key={tag.id}
                             className="inline-flex items-center px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-md text-xs font-medium"
-                            >
+                          >
                             #{tag.name}
-                            </span>
+                          </span>
                         ))}
                         {article.article_tags?.length > 3 && (
-                            <span className="inline-flex items-center px-2.5 py-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-md text-xs font-medium">
+                          <span className="inline-flex items-center px-2.5 py-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-md text-xs font-medium">
                             +{article.article_tags.length - 3} more
-                            </span>
+                          </span>
                         )}
-                        </div>
-
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -222,14 +233,13 @@ export default async function ArticlesPage() {
                     <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Popular Tags</h3>
                     <div className="flex flex-wrap gap-2">
                       {popularTags?.slice(0, 12).map((tag) => (
-                    <span
-                        key={tag.id}
-                        className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-md text-sm font-medium"
-                    >
-                        #{tag.name}
-                    </span>
-                    ))}
-
+                        <span
+                          key={tag.id}
+                          className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-md text-sm font-medium"
+                        >
+                          #{tag.name}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>
