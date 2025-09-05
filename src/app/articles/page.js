@@ -2,43 +2,42 @@ import Link from "next/link";
 import { supabase } from "@/utils/supabaseClient";
 
 export default async function ArticlesPage() {
-  // Fetch articles with author info and tags
-  const { data: articles, error } = await supabase
-    .from("articles")
-    .select(`
-      id,
-      title,
-      slug,
-      content,
-      created_at,
-      author:author_id (
-        name
-      ),
-      article_tags:article_tags (
-        tag_id,
-        tag:tag_id (
-          id,
-          name
-        )
-      )
-    `)
-    .order("created_at", { ascending: false });
+  let articles = [];
+  let popularTags = [];
 
-  // Fetch popular tags for the sidebar
-  const { data: popularTags } = await supabase
-    .from("tags")
-    .select(`
-      id,
-      name,
-      article_tags (count)
-    `)
-    .limit(10);
+  // Fetch data with proper error handling
+  try {
+    const { data: articlesData, error: articlesError } = await supabase
+      .from("articles")
+      .select(`
+        id,
+        title,
+        slug,
+        content,
+        created_at,
+        author:author_id(name),
+        article_tags:article_tags(tag_id, tag:tag_id(id, name))
+      `)
+      .order("created_at", { ascending: false });
 
-  if (error) {
+    if (articlesError) throw articlesError;
+    articles = articlesData || [];
+
+    const { data: tagsData, error: tagsError } = await supabase
+      .from("tags")
+      .select(`id, name, article_tags(count)`)
+      .limit(10);
+
+    if (tagsError) throw tagsError;
+    popularTags = tagsData || [];
+  } catch (err) {
+    console.error("Supabase fetch error:", err.message);
     return (
       <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">Error Loading Articles</h1>
+          <h1 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">
+            Error Loading Articles
+          </h1>
           <p className="text-neutral-600 dark:text-neutral-400">Please try again later.</p>
         </div>
       </div>
@@ -69,19 +68,8 @@ export default async function ArticlesPage() {
       <nav className="relative z-10 flex justify-between items-center px-6 sm:px-20 py-6 border-b border-neutral-200/50 dark:border-neutral-800/50">
         <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-neutral-900 to-neutral-700 dark:from-neutral-100 dark:to-neutral-300">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-white dark:text-neutral-900"
-            >
-              <path
-                d="M3 3h18v18H3zM8 8h8M8 12h8M8 16h5"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-white dark:text-neutral-900">
+              <path d="M3 3h18v18H3zM8 8h8M8 12h8M8 16h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </div>
           <span className="font-bold text-xl text-neutral-900 dark:text-neutral-100">DevArticles</span>
@@ -127,12 +115,7 @@ export default async function ArticlesPage() {
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input
                   type="text"
@@ -174,12 +157,9 @@ export default async function ArticlesPage() {
                     >
                       {/* Article Header */}
                       <div className="flex items-start gap-4 mb-6">
-                        {/* Author Avatar */}
                         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold flex-shrink-0">
                           {article.author?.name ? article.author.name.charAt(0).toUpperCase() : "A"}
                         </div>
-
-                        {/* Author Info and Meta */}
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2 mb-2">
                             <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
@@ -206,7 +186,6 @@ export default async function ArticlesPage() {
                         <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-4 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200 line-clamp-2">
                           {article.title}
                         </h2>
-
                         <p className="text-neutral-600 dark:text-neutral-400 leading-relaxed mb-6 line-clamp-3">
                           {truncateContent(article.content.replace(/[#*`]/g, ""))}
                         </p>
@@ -237,11 +216,10 @@ export default async function ArticlesPage() {
               {/* Sidebar */}
               <aside className="lg:col-span-1">
                 <div className="sticky top-8 space-y-8">
-                  {/* Popular Tags */}
                   <div className="bg-white/60 dark:bg-neutral-900/60 backdrop-blur-sm border border-neutral-200/50 dark:border-neutral-800/50 rounded-2xl p-6">
                     <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Popular Tags</h3>
                     <div className="flex flex-wrap gap-2">
-                                            {popularTags?.slice(0, 12).map((tag) => (
+                      {popularTags?.slice(0, 12).map((tag) => (
                         <Link
                           key={tag.id}
                           href={`/tags/${tag.name}`}
@@ -261,4 +239,3 @@ export default async function ArticlesPage() {
     </div>
   );
 }
-
