@@ -32,27 +32,55 @@ export default async function Home() {
       <div className="fixed inset-0 bg-neutral-50/80 dark:bg-neutral-900/80 pointer-events-none"></div>
 
       {/* Navigation */}
-      <nav className="relative z-10 flex items-center px-6 sm:px-20 py-8 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-neutral-900 to-neutral-700 dark:from-neutral-100 dark:to-neutral-300 shadow-sm">
-            <svg 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              className="text-white dark:text-neutral-900"
-            >
-              <path 
-                d="M3 3h18v18H3zM8 8h8M8 12h8M8 16h5" 
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
-          <span className="font-bold text-xl text-neutral-900 dark:text-neutral-100 tracking-tight">DevArticles</span>
-        </div>
-      </nav>
+      {/* Navigation */}
+<nav className="relative z-10 flex justify-between items-center px-6 sm:px-20 py-8 backdrop-blur-sm">
+  <div className="flex items-center gap-3">
+    <div className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-neutral-900 to-neutral-700 dark:from-neutral-100 dark:to-neutral-300 shadow-sm">
+      <svg 
+        width="16" 
+        height="16" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        className="text-white dark:text-neutral-900"
+      >
+        <path 
+          d="M3 3h18v18H3zM8 8h8M8 12h8M8 16h5" 
+          stroke="currentColor" 
+          strokeWidth="2" 
+          strokeLinecap="round"
+        />
+      </svg>
+    </div>
+    <span className="font-bold text-xl text-neutral-900 dark:text-neutral-100 tracking-tight">DevArticles</span>
+  </div>
+
+  <div className="flex items-center gap-4">
+    {user ? (
+      <>
+        <Link
+          href="/articles"
+          className="px-4 py-2 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium transition-colors duration-200"
+        >
+          Articles
+        </Link>
+        <Link
+          href="/dashboard"
+          className="px-6 py-2.5 bg-white dark:bg-neutral-100 dark:hover:bg-neutral-200 hover:bg-neutral-50 text-neutral-900 dark:text-neutral-900 font-semibold rounded-xl transition-all duration-200 shadow-sm hover:shadow-md border border-neutral-200 dark:border-neutral-300"
+        >
+          Dashboard
+        </Link>
+      </>
+    ) : (
+      <Link
+        href="/articles"
+        className="px-4 py-2 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 font-medium transition-colors duration-200"
+      >
+        Browse Articles
+      </Link>
+    )}
+  </div>
+</nav>
+
 
       {/* Hero Section */}
       <header className="relative z-10 py-24 px-6 sm:px-20 text-center">
