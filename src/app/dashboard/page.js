@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/utils/supabaseClient";
@@ -12,18 +12,24 @@ export default function DashboardPage() {
     totalArticles: 0,
     totalViews: 0,
     totalComments: 0,
-    thisWeekArticles: 0
+    thisWeekArticles: 0,
   });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
+  const [deletingId, setDeletingId] = useState(null);
   const router = useRouter();
 
-  useEffect(() => {
-    const getUserAndArticles = async () => {
+  const fetchUserAndArticles = useCallback(async () => {
+    try {
+      setLoading(true);
+
       // Get logged-in user
       const {
         data: { user: authUser },
+        error: authError,
       } = await supabase.auth.getUser();
+
+      if (authError) console.error("Auth error:", authError);
 
       if (!authUser) {
         router.push("/auth");
@@ -31,18 +37,23 @@ export default function DashboardPage() {
       }
 
       // Get user data from your users table
-      const { data: userData } = await supabase
+      const { data: userData, error: userError } = await supabase
         .from("users")
         .select("id, email, name, created_at")
         .eq("id", authUser.id)
         .single();
 
+      if (userError) {
+        console.warn("No user row found in 'users' table for this id. Falling back to auth user.", userError);
+      }
+
       setUser(userData || { id: authUser.id, email: authUser.email });
 
       // Fetch articles authored by this user with tags and analytics
-      const { data: articlesData, error } = await supabase
+      const { data: articlesData, error: articlesError } = await supabase
         .from("articles")
-        .select(`
+        .select(
+          `
           id, 
           title, 
           content,
@@ -54,56 +65,73 @@ export default function DashboardPage() {
               name
             )
           )
-        `)
+        `
+        )
         .eq("author_id", authUser.id)
         .order("created_at", { ascending: false });
 
-      if (!error && articlesData) {
-        setArticles(articlesData);
-        
-        // Get article IDs for analytics
-        const articleIds = articlesData.map(a => a.id);
-        
-        // Get total views for user's articles
-        let totalViews = 0;
-        if (articleIds.length > 0) {
-          const { count: viewsCount } = await supabase
-            .from("views")
-            .select("id", { count: "exact" })
-            .in("article_id", articleIds);
-          totalViews = viewsCount || 0;
-        }
-
-        // Get total comments for user's articles
-        let totalComments = 0;
-        if (articleIds.length > 0) {
-          const { count: commentsCount } = await supabase
-            .from("comments")
-            .select("id", { count: "exact" })
-            .in("article_id", articleIds);
-          totalComments = commentsCount || 0;
-        }
-
-        // Calculate this week's articles
-        const now = new Date();
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const thisWeekArticles = articlesData.filter(
-          article => new Date(article.created_at) > weekAgo
-        ).length;
-
+      if (articlesError) {
+        console.error("Error fetching articles:", articlesError);
+        setArticles([]);
         setStats({
-          totalArticles: articlesData.length,
-          totalViews,
-          totalComments,
-          thisWeekArticles
+          totalArticles: 0,
+          totalViews: 0,
+          totalComments: 0,
+          thisWeekArticles: 0,
         });
+        return;
       }
-      
-      setLoading(false);
-    };
 
-    getUserAndArticles();
+      setArticles(articlesData || []);
+
+      // Get article IDs for analytics
+      const articleIds = (articlesData || []).map((a) => a.id);
+
+      // Get total views for user's articles (use head:true to avoid row payload)
+      let totalViews = 0;
+      if (articleIds.length > 0) {
+        const { count: viewsCount, error: viewsError } = await supabase
+          .from("views")
+          .select("id", { count: "exact", head: true })
+          .in("article_id", articleIds);
+        if (viewsError) console.error("Error counting views:", viewsError);
+        totalViews = viewsCount || 0;
+      }
+
+      // Get total comments for user's articles (use head:true to avoid row payload)
+      let totalComments = 0;
+      if (articleIds.length > 0) {
+        const { count: commentsCount, error: commentsError } = await supabase
+          .from("comments")
+          .select("id", { count: "exact", head: true })
+          .in("article_id", articleIds);
+        if (commentsError) console.error("Error counting comments:", commentsError);
+        totalComments = commentsCount || 0;
+      }
+
+      // Calculate this week's articles
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const thisWeekArticles = (articlesData || []).filter(
+        (article) => new Date(article.created_at) > weekAgo
+      ).length;
+
+      setStats({
+        totalArticles: (articlesData || []).length,
+        totalViews,
+        totalComments,
+        thisWeekArticles,
+      });
+    } catch (err) {
+      console.error("Unexpected error loading dashboard:", err);
+    } finally {
+      setLoading(false);
+    }
   }, [router]);
+
+  useEffect(() => {
+    fetchUserAndArticles();
+  }, [fetchUserAndArticles]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -112,14 +140,64 @@ export default function DashboardPage() {
 
   const calculateReadTime = (content) => {
     const wordsPerMinute = 200;
-    const wordCount = content.split(' ').length;
-    return Math.ceil(wordCount / wordsPerMinute);
+    const wordCount = (content?.trim()?.split(/\s+/)?.length) || 0;
+    return Math.max(1, Math.ceil(wordCount / wordsPerMinute));
   };
 
   const truncateContent = (content, maxLength = 150) => {
-    const cleanContent = content.replace(/[#*`]/g, '').trim();
+    const cleanContent = (content || "")
+      // strip common markdown symbols quickly
+      .replace(/[#*_`>!\[\]()~\-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (cleanContent.length <= maxLength) return cleanContent;
     return cleanContent.substring(0, maxLength).trim() + "...";
+  };
+
+  const handleDeleteArticle = async (article) => {
+    if (!article?.id) return;
+
+    const confirm = window.confirm(
+      `Delete "${article.title}"? This cannot be undone.`
+    );
+    if (!confirm) return;
+
+    setDeletingId(article.id);
+
+    // Optimistic UI: remove locally first
+    const prevArticles = articles;
+    const nextArticles = articles.filter((a) => a.id !== article.id);
+    setArticles(nextArticles);
+
+    try {
+      // If you DON'T have FK CASCADEs, uncomment this order:
+      // 1) await supabase.from("comments").delete().eq("article_id", article.id);
+      // 2) await supabase.from("views").delete().eq("article_id", article.id);
+      // 3) await supabase.from("article_tags").delete().eq("article_id", article.id);
+
+      // Delete the article (if FK with ON DELETE CASCADE exists, related rows will be deleted automatically)
+      const { error: delError } = await supabase
+        .from("articles")
+        .delete()
+        .eq("id", article.id);
+
+      if (delError) {
+        console.error("Error deleting article:", delError);
+        // Revert optimistic update on error
+        setArticles(prevArticles);
+        alert("Failed to delete the article. Please try again.");
+        return;
+      }
+
+      // Refresh stats safely after deletion
+      await fetchUserAndArticles();
+    } catch (e) {
+      console.error("Delete flow error:", e);
+      setArticles(prevArticles);
+      alert("Failed to delete the article. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   if (loading) {
@@ -143,29 +221,29 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
       {/* Subtle gradient overlay */}
       <div className="fixed inset-0 bg-gradient-to-br from-neutral-50 via-neutral-100/50 to-neutral-200/30 dark:from-neutral-950 dark:via-neutral-900/50 dark:to-neutral-800/30 pointer-events-none" />
-      
+
       {/* Navigation */}
       <nav className="relative z-10 flex justify-between items-center px-6 sm:px-20 py-6 border-b border-neutral-200/50 dark:border-neutral-800/50">
         <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-neutral-900 to-neutral-700 dark:from-neutral-100 dark:to-neutral-300">
-            <svg 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
               className="text-white dark:text-neutral-900"
             >
-              <path 
-                d="M3 3h18v18H3zM8 8h8M8 12h8M8 16h5" 
-                stroke="currentColor" 
-                strokeWidth="2" 
+              <path
+                d="M3 3h18v18H3zM8 8h8M8 12h8M8 16h5"
+                stroke="currentColor"
+                strokeWidth="2"
                 strokeLinecap="round"
               />
             </svg>
           </div>
           <span className="font-bold text-xl text-neutral-900 dark:text-neutral-100">DevArticles</span>
         </Link>
-        
+
         <div className="flex items-center gap-4">
           <Link
             href="/articles"
@@ -196,12 +274,12 @@ export default function DashboardPage() {
             <div className="text-center mb-12">
               {/* User Avatar */}
               <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white text-3xl font-bold mx-auto mb-6 shadow-lg">
-                {user?.name ? user.name.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
+                {user?.name ? user.name.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || "U"}
               </div>
-              
+
               <h1 className="text-4xl sm:text-5xl font-bold mb-4 tracking-tight">
                 <span className="bg-gradient-to-r from-neutral-900 via-neutral-700 to-neutral-600 dark:from-neutral-100 dark:via-neutral-300 dark:to-neutral-400 bg-clip-text text-transparent">
-                  Welcome back, {user?.name || 'Author'}! 👋
+                  Welcome back, {user?.name || "Author"}! 👋
                 </span>
               </h1>
               <p className="text-xl text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto leading-relaxed">
@@ -279,7 +357,7 @@ export default function DashboardPage() {
               {[
                 { id: "overview", label: "📊 Overview", icon: "chart" },
                 { id: "articles", label: "📝 My Articles", icon: "document" },
-                { id: "analytics", label: "📈 Analytics", icon: "analytics" }
+                { id: "analytics", label: "📈 Analytics", icon: "analytics" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -336,7 +414,10 @@ export default function DashboardPage() {
                     ) : (
                       <div className="space-y-4">
                         {articles.slice(0, 5).map((article) => (
-                          <div key={article.id} className="group p-4 rounded-2xl border border-neutral-200/50 dark:border-neutral-700/50 hover:border-neutral-300/50 dark:hover:border-neutral-600/50 transition-all duration-200 hover:bg-white/50 dark:hover:bg-neutral-800/50">
+                          <div
+                            key={article.id}
+                            className="group p-4 rounded-2xl border border-neutral-200/50 dark:border-neutral-700/50 hover:border-neutral-300/50 dark:hover:border-neutral-600/50 transition-all duration-200 hover:bg-white/50 dark:hover:bg-neutral-800/50"
+                          >
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 min-w-0">
                                 <Link href={`/articles/${article.slug}`}>
@@ -348,13 +429,22 @@ export default function DashboardPage() {
                                   {truncateContent(article.content)}
                                 </p>
                                 <div className="flex items-center gap-4 text-xs text-neutral-500 dark:text-neutral-400">
-                                  <span>{new Date(article.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                  <span>
+                                    {new Date(article.created_at).toLocaleDateString("en-US", {
+                                      month: "short",
+                                      day: "numeric",
+                                      year: "numeric",
+                                    })}
+                                  </span>
                                   <span>•</span>
                                   <span>{calculateReadTime(article.content)} min read</span>
                                   {article.article_tags?.length > 0 && (
                                     <>
                                       <span>•</span>
-                                      <span>{article.article_tags.length} tag{article.article_tags.length !== 1 ? 's' : ''}</span>
+                                      <span>
+                                        {article.article_tags.length} tag
+                                        {article.article_tags.length !== 1 ? "s" : ""}
+                                      </span>
                                     </>
                                   )}
                                 </div>
@@ -363,15 +453,32 @@ export default function DashboardPage() {
                                 <Link
                                   href={`/articles/${article.slug}`}
                                   className="p-2 rounded-lg bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 transition-colors"
+                                  title="View"
                                 >
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                   </svg>
                                 </Link>
-                                <button className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-400 transition-colors">
+                                <Link
+                                  href={`/articles/${article.slug}/edit`}
+                                  className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-400 transition-colors"
+                                  title="Edit"
+                                >
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </Link>
+                                <button
+                                  onClick={() => handleDeleteArticle(article)}
+                                  disabled={deletingId === article.id}
+                                  className={`p-2 rounded-lg bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 transition-colors ${
+                                    deletingId === article.id ? "opacity-50 cursor-not-allowed" : ""
+                                  }`}
+                                  title="Delete"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7h6m-7 0V5a2 2 0 012-2h2a2 2 0 012 2v2" />
                                   </svg>
                                 </button>
                               </div>
@@ -430,7 +537,9 @@ export default function DashboardPage() {
                       <div className="flex justify-between">
                         <span className="text-neutral-600 dark:text-neutral-400">Member since:</span>
                         <span className="font-medium text-neutral-900 dark:text-neutral-100">
-                          {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Recently'}
+                          {user?.created_at
+                            ? new Date(user.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })
+                            : "Recently"}
                         </span>
                       </div>
                     </div>
@@ -440,9 +549,9 @@ export default function DashboardPage() {
             )}
 
             {activeTab === "articles" && (
-                            <div className="bg-white/60 dark:bg-neutral-900/60 backdrop-blur-sm border border-neutral-200/50 dark:border-neutral-800/50 rounded-2xl p-8 shadow-lg">
+              <div className="bg-white/60 dark:bg-neutral-900/60 backdrop-blur-sm border border-neutral-200/50 dark:border-neutral-800/50 rounded-2xl p-8 shadow-lg">
                 <h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mb-6">All Your Articles</h3>
-                
+
                 {articles.length === 0 ? (
                   <div className="text-center py-12">
                     <div className="w-16 h-16 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -465,7 +574,10 @@ export default function DashboardPage() {
                 ) : (
                   <div className="space-y-4">
                     {articles.map((article) => (
-                      <div key={article.id} className="group p-4 rounded-2xl border border-neutral-200/50 dark:border-neutral-700/50 hover:border-neutral-300/50 dark:hover:border-neutral-600/50 transition-all duration-200 hover:bg-white/50 dark:hover:bg-neutral-800/50">
+                      <div
+                        key={article.id}
+                        className="group p-4 rounded-2xl border border-neutral-200/50 dark:border-neutral-700/50 hover:border-neutral-300/50 dark:hover:border-neutral-600/50 transition-all duration-200 hover:bg-white/50 dark:hover:bg-neutral-800/50"
+                      >
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
                             <Link href={`/articles/${article.slug}`}>
@@ -477,13 +589,22 @@ export default function DashboardPage() {
                               {truncateContent(article.content)}
                             </p>
                             <div className="flex items-center gap-4 text-xs text-neutral-500 dark:text-neutral-400">
-                              <span>{new Date(article.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span>
+                                {new Date(article.created_at).toLocaleDateString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })}
+                              </span>
                               <span>•</span>
                               <span>{calculateReadTime(article.content)} min read</span>
                               {article.article_tags?.length > 0 && (
                                 <>
                                   <span>•</span>
-                                  <span>{article.article_tags.length} tag{article.article_tags.length !== 1 ? 's' : ''}</span>
+                                  <span>
+                                    {article.article_tags.length} tag
+                                    {article.article_tags.length !== 1 ? "s" : ""}
+                                  </span>
                                 </>
                               )}
                             </div>
@@ -492,15 +613,32 @@ export default function DashboardPage() {
                             <Link
                               href={`/articles/${article.slug}`}
                               className="p-2 rounded-lg bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 transition-colors"
+                              title="View"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                               </svg>
                             </Link>
-                            <button className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-400 transition-colors">
+                            <Link
+                              href={`/articles/${article.slug}/edit`}
+                              className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-400 transition-colors"
+                              title="Edit"
+                            >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </Link>
+                            <button
+                              onClick={() => handleDeleteArticle(article)}
+                              disabled={deletingId === article.id}
+                              className={`p-2 rounded-lg bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 transition-colors ${
+                                deletingId === article.id ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                              title="Delete"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7h6m-7 0V5a2 2 0 012-2h2a2 2 0 012 2v2" />
                               </svg>
                             </button>
                           </div>
